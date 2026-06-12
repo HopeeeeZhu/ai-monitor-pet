@@ -1,0 +1,8 @@
+.DS_Store
+.idea/
+.aone_copilot/
+AIMonitorPet/.build/
+pet-monitor/.venv/
+pet-monitor/.pet_pos.json
+一些素材/
+AIMonitorPet/dist/*.dmg
