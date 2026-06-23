@@ -52,6 +52,7 @@ class UsageMonitor {
     }
 
     private func publish(_ usage: ToolUsage, for tool: ToolType) {
+        if tool == .claudeDesktop { claudePublishedOnce = true }
         Task { @MainActor in
             self.monitorEngine.updateUsage(tool: tool, usage: usage)
         }
@@ -138,7 +139,7 @@ class UsageMonitor {
         return nil
     }
 
-    // MARK: - Claude (OAuth usage 接口 + 自动刷新 token)
+    // MARK: - Claude (OAuth usage 接口, 只读不刷新)
 
     private struct ClaudeCredentials {
         var accessToken: String
@@ -152,10 +153,9 @@ class UsageMonitor {
         case failure
     }
 
-    /// Claude Code 的公开 OAuth client id(官方 CLI 同款)
-    private let claudeClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
     private let keychainService = "Claude Code-credentials"
-    private var claudeCreds: ClaudeCredentials?
+    /// 是否已为 Claude 发布过任何额度数据; 用于失败时决定是否补占位行
+    private var claudePublishedOnce = false
 
     private func pollClaude() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -164,38 +164,25 @@ class UsageMonitor {
     }
 
     private func pollClaudeSync() {
-        guard var creds = claudeCreds ?? readClaudeCredentials() else {
+        // 只读模式: 每轮重读钥匙串拿当前 token, 绝不刷新/写回。
+        // 刷新会轮换 refresh token, 把 Claude CLI 自己的登录挤掉, 故监工只观察不动凭证。
+        guard let creds = readClaudeCredentials() else {
             publish(ToolUsage(fiveHour: nil, weekly: nil, updatedAt: Date(),
                               note: "未找到 Claude Code 凭证"), for: .claudeDesktop)
             return
         }
 
-        // 过期或临期(60s 内)先刷新
-        if let expiresAt = creds.expiresAt, expiresAt.timeIntervalSinceNow < 60,
-           let refreshed = refreshClaudeCredentials(creds) {
-            creds = refreshed
-        }
-        claudeCreds = creds
-
         switch fetchClaudeUsage(accessToken: creds.accessToken) {
         case .success(let usage):
             publish(usage, for: .claudeDesktop)
-        case .unauthorized:
-            // 本地 expiresAt 不准时兜底: 401 后强制刷新再试一次
-            if let refreshed = refreshClaudeCredentials(creds) {
-                claudeCreds = refreshed
-                if case .success(let usage) = fetchClaudeUsage(accessToken: refreshed.accessToken) {
-                    publish(usage, for: .claudeDesktop)
-                    return
-                }
+        case .unauthorized, .failure:
+            // token 过期(401)或网络/限流(failure): 不主动刷新, 等 Claude Code
+            // 下次自己用时刷新, 监工下一轮重读钥匙串即可拿到新 token。
+            // 有过数据就保留上次不覆盖; 从没发布过则补占位, 避免整行消失。
+            if !claudePublishedOnce {
+                publish(ToolUsage(fiveHour: nil, weekly: nil, updatedAt: Date(),
+                                  note: "额度获取中…"), for: .claudeDesktop)
             }
-            // 刷新也失败: 丢掉缓存, 下一轮重新读钥匙串
-            claudeCreds = nil
-            publish(ToolUsage(fiveHour: nil, weekly: nil, updatedAt: Date(),
-                              note: "Claude 登录已失效, 重新登录 Claude Code 后恢复"), for: .claudeDesktop)
-        case .failure:
-            // 网络失败/429: 保留上次数据, 不覆盖
-            break
         }
     }
 
@@ -220,57 +207,6 @@ class UsageMonitor {
         let fiveHour = claudeWindow(from: obj["five_hour"])
         let weekly = claudeWindow(from: obj["seven_day"])
         return .success(ToolUsage(fiveHour: fiveHour, weekly: weekly, updatedAt: Date(), note: nil))
-    }
-
-    /// 用 refresh token 换新 access token(与 Claude Code 官方刷新同一接口), 成功后写回钥匙串保持同步
-    /// Claude Code cli.js 用的是 platform.claude.com; 旧的 console.anthropic.com 会被限流(429), 仅作兜底
-    private let tokenEndpoints: [(url: String, userAgent: String)] = [
-        ("https://platform.claude.com/v1/oauth/token", "claude-cli/2.0.0 (external, cli)"),
-        ("https://console.anthropic.com/v1/oauth/token", "anthropic"),
-    ]
-
-    private func refreshClaudeCredentials(_ creds: ClaudeCredentials) -> ClaudeCredentials? {
-        guard let refreshToken = creds.refreshToken else { return nil }
-
-        var responseData: Data?
-        for endpoint in tokenEndpoints {
-            var request = URLRequest(url: URL(string: endpoint.url)!)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue(endpoint.userAgent, forHTTPHeaderField: "User-Agent")
-            request.timeoutInterval = 15
-            request.httpBody = try? JSONSerialization.data(withJSONObject: [
-                "grant_type": "refresh_token",
-                "refresh_token": refreshToken,
-                "client_id": claudeClientId,
-            ])
-
-            let (data, status) = performRequest(request)
-            if status == 200 {
-                responseData = data
-                break
-            }
-            print("[UsageMonitor] Claude token refresh failed at \(endpoint.url), status \(status)")
-        }
-
-        guard let data = responseData,
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let accessToken = obj["access_token"] as? String else {
-            return nil
-        }
-
-        var expiresAt: Date?
-        if let expiresIn = doubleValue(obj["expires_in"]) {
-            expiresAt = Date().addingTimeInterval(expiresIn)
-        }
-        let refreshed = ClaudeCredentials(
-            accessToken: accessToken,
-            refreshToken: (obj["refresh_token"] as? String) ?? refreshToken,
-            expiresAt: expiresAt
-        )
-        writeBackToKeychain(refreshed)
-        print("[UsageMonitor] Claude token refreshed")
-        return refreshed
     }
 
     private func claudeWindow(from value: Any?) -> UsageWindow? {
@@ -322,34 +258,6 @@ class UsageMonitor {
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
         return item as? Data
-    }
-
-    /// 刷新成功后把新 token 写回钥匙串, 让 Claude Code 也能用上(保持原 JSON 结构, 仅更新字段)
-    private func writeBackToKeychain(_ creds: ClaudeCredentials) {
-        guard let data = readKeychainCredentialsData(),
-              var obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              var oauth = obj["claudeAiOauth"] as? [String: Any] else {
-            return
-        }
-        oauth["accessToken"] = creds.accessToken
-        if let refreshToken = creds.refreshToken {
-            oauth["refreshToken"] = refreshToken
-        }
-        if let expiresAt = creds.expiresAt {
-            oauth["expiresAt"] = Int(expiresAt.timeIntervalSince1970 * 1000)
-        }
-        obj["claudeAiOauth"] = oauth
-        guard let newData = try? JSONSerialization.data(withJSONObject: obj) else { return }
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-        ]
-        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: newData] as CFDictionary)
-        if status != errSecSuccess {
-            // 写回失败不影响本 App(token 在内存里), 只是 Claude Code 下次要自己再刷一遍
-            print("[UsageMonitor] Keychain write-back failed: \(status)")
-        }
     }
 
     /// 同步执行 HTTP 请求(仅在后台队列调用)

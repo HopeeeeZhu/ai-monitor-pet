@@ -48,7 +48,7 @@
 ## 额度显示原理
 
 - **Codex**：纯本地读取 `~/.codex/sessions` 会话日志里的 `rate_limits` 字段，每 60 秒刷新，不发任何网络请求
-- **Claude**：调用官方 OAuth usage 接口（即 Claude Code `/usage` 命令的数据源），token 从钥匙串读取，每 3 分钟刷新；token 过期时自动用 refresh token 换新并写回钥匙串
+- **Claude**：调用官方 OAuth usage 接口（即 Claude Code `/usage` 命令的数据源），token 从钥匙串**只读**，每 3 分钟刷新一次数据。**监工绝不刷新或写回 token**——刷新会轮换 refresh token、挤掉 Claude CLI 的登录（详见「踩坑记录」）。token 过期就等 Claude Code 自己用时刷新，监工下一轮重读钥匙串即可拿到新 token；这期间额度数字保持上次的值
 
 ## 自行构建
 
@@ -59,8 +59,10 @@ cd AIMonitorPet
 swift build -c release
 cp .build/release/AIMonitorPet "dist/AI监工.app/Contents/MacOS/AI监工"
 codesign --force --deep --sign - "dist/AI监工.app"
-open "dist/AI监工.app"
+open -n "dist/AI监工.app"   # 必须用 -n, 见下方「踩坑」
 ```
+
+或直接跑一键脚本 `AIMonitorPet/rebuild.sh`（编译 → 替换 → 签名 → 重启）。
 
 ## 项目结构
 
@@ -77,6 +79,25 @@ AIMonitorPet/          Swift 主程序（日常使用版）
 pet-monitor/           早期 Python/pyobjc 原型（已弃用）
 CLAUDE.md              产品定义与技术调研记录
 ```
+
+## 踩坑记录
+
+**0. 监工自动刷新 token 反复挤掉 Claude CLI 登录（2026-06-23 改只读修复）⚠️ 最坑**
+监工和 Claude CLI 共用钥匙串里同一份 OAuth 凭证。OAuth 的 refresh token 是**一次性轮换**的——拿它换新 access token 时，服务器会作废旧的、发一个新的。旧版监工每轮会主动刷新临期 token 并写回钥匙串，于是和 CLI 互相踩踏：监工先刷新就作废了 CLI 手里的 refresh token → **CLI 登录失效**；CLI 先刷新则监工 401 → 面板「登录已失效」。表现为反复 `/login` 都治不好。
+- 根治：监工改成**纯只读**——删掉所有刷新/写回逻辑（`refreshClaudeCredentials`/`writeBackToKeychain`），每轮只 `readClaudeCredentials()` 读当前 token。过期就等 Claude Code 自己刷，下一轮重读即可。代价：长时间完全不用 Claude 时额度数字不实时。
+- 教训：**监控工具绝不能改动被监控对象的共享状态**（尤其是会轮换的凭证）。
+
+**1. 额度请求失败时整行消失（2026-06-23 修复）**
+`UsageMonitor` 调 Claude OAuth usage 接口，遇到非 200/401（最常见是 **429 限流**）走 `.failure` 分支。面板只在 `usage[.claudeDesktop]` 有值时才渲染 Claude 那一行，所以刚重启 + 失败时整行凭空消失，看起来像"登录没了"。
+- 限流诱因：短时间内反复 `/login` + 重启 App，把 OAuth usage 的限流桶打满（接口实测 180s 轮询才安全，且必须带 `claude-code` UA，否则持续 429）。
+- 修复：加 `claudePublishedOnce` 标记，`.failure` 且从未发布过时补一行占位"额度获取中…"，限流过去后下一轮自动恢复成真实额度。**终端登录状态与此无关，别被误导去反复重登。**
+
+**2. 重新编译后界面没变 —— `open` 不启动新二进制（2026-06-23）**
+macOS 上若已有同 bundle id 的 App 在跑，`open xxx.app` 只会把旧实例切到前台，不会启动新编译的二进制。机器上同时装了 dmg 版「小安竺来咯」时尤其容易中招。
+- 解法：先 `pkill` / `quit` 掉所有旧实例，再用 `open -n` 强制起新实例：
+  ```bash
+  osascript -e 'quit app "小安竺来咯"' 2>/dev/null; pkill -f "小安竺\|AI监工\|AIMonitorPet"; sleep 2; open -n ~/Desktop/workspace/AI监工/AIMonitorPet/dist/AI监工.app
+  ```
 
 ## 版本历史
 
