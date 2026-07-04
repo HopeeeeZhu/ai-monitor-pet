@@ -11,9 +11,9 @@
     <key>CFBundleExecutable</key>
     <string>AI监工</string>
     <key>CFBundleVersion</key>
-    <string>1.1.1</string>
+    <string>1.2.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1.1</string>
+    <string>1.2.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
@@ -26,5 +26,9 @@
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>AI监工需要使用AppleScript来激活对应的应用窗口和检测弹窗。</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>AI监工需要使用麦克风来记录你的语音待办和临时想法。</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>AI监工需要使用语音识别把你的语音待办和临时想法转成文字。</string>
 </dict>
 </plist>

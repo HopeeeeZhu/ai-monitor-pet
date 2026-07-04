@@ -23,6 +23,8 @@ class PetWindow: NSPanel {
     private var didDrag = false
     private var dragOffset: NSPoint = .zero
     private var statusPanelController: StatusPanelController?
+    private let voiceCaptureController: VoiceCaptureController
+    private let captureStore: CaptureStore
     private var currentFrameIndex: Int = 0
     /// 每个 AI 工具一个独立气泡, 竖向堆叠在宠物头顶
     private var statusBubbles: [(background: NSView, label: NSTextField, size: NSSize)] = []
@@ -36,8 +38,10 @@ class PetWindow: NSPanel {
     static let defaultPetSize: CGFloat = 140
     private var petSize: CGFloat
 
-    init(monitorEngine: MonitorEngine) {
+    init(monitorEngine: MonitorEngine, voiceCaptureController: VoiceCaptureController, captureStore: CaptureStore) {
         self.monitorEngine = monitorEngine
+        self.voiceCaptureController = voiceCaptureController
+        self.captureStore = captureStore
 
         let savedSize = UserDefaults.standard.double(forKey: "petSize")
         self.petSize = savedSize > 0 ? CGFloat(savedSize) : PetWindow.defaultPetSize
@@ -51,11 +55,12 @@ class PetWindow: NSPanel {
         )
 
         configureWindow()
+        voiceCaptureController.setAnchorWindow(self)
         loadSpriteFrames()
         setupImageView()
         bindToMonitorEngine()
         positionAtBottomRight()
-        statusPanelController = StatusPanelController(monitorEngine: monitorEngine)
+        statusPanelController = StatusPanelController(monitorEngine: monitorEngine, captureStore: captureStore)
         setAnimation(.sleeping, force: true)
     }
 
@@ -332,6 +337,7 @@ class PetWindow: NSPanel {
             y: baseOrigin.y + offsetY
         )
         setFrameOrigin(newOrigin)
+        voiceCaptureController.positionHUD()
     }
 
     private func positionAtBottomRight() {
@@ -366,6 +372,7 @@ class PetWindow: NSPanel {
             y: mouseLocation.y - dragOffset.y
         )
         setFrameOrigin(newOrigin)
+        voiceCaptureController.positionHUD()
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -384,6 +391,13 @@ class PetWindow: NSPanel {
 
     private func showContextMenu(at event: NSEvent) {
         let menu = NSMenu()
+
+        let voiceItem = NSMenuItem(title: "语音记录", action: #selector(startVoiceCapture), keyEquivalent: "v")
+        voiceItem.keyEquivalentModifierMask = [.control, .option]
+        voiceItem.target = self
+        menu.addItem(voiceItem)
+
+        menu.addItem(.separator())
 
         let sizeMenu = NSMenu()
         for size in [100, 120, 140, 160, 200, 260, 320, 400] {
@@ -411,6 +425,10 @@ class PetWindow: NSPanel {
     @objc private func changeSizeAction(_ sender: NSMenuItem) {
         let newHeight = CGFloat(sender.tag)
         resizePet(height: newHeight)
+    }
+
+    @objc private func startVoiceCapture() {
+        voiceCaptureController.startRecording()
     }
 
     @objc private func quitApp() {
@@ -495,5 +513,6 @@ class PetWindow: NSPanel {
         }
 
         baseOrigin = frame.origin
+        voiceCaptureController.positionHUD()
     }
 }

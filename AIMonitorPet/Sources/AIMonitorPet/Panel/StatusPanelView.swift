@@ -1,10 +1,29 @@
 import SwiftUI
 
+enum CaptureFilter: String, CaseIterable, Identifiable {
+    case all
+    case todo
+    case idea
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .all: return "全部"
+        case .todo: return "待办"
+        case .idea: return "想法"
+        }
+    }
+}
+
 struct StatusPanelView: View {
     @ObservedObject var monitorEngine: MonitorEngine
+    @ObservedObject var captureStore: CaptureStore
     var onClose: (() -> Void)?
     @State private var selectedTool: ToolState?
     @State private var selectedProject: ProjectState?
+    @State private var showingCaptureInbox = false
+    @State private var captureFilter: CaptureFilter = .all
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,7 +37,9 @@ struct StatusPanelView: View {
 
     private var headerView: some View {
         HStack {
-            if selectedProject != nil {
+            if showingCaptureInbox {
+                backButton { showingCaptureInbox = false }
+            } else if selectedProject != nil {
                 backButton { selectedProject = nil }
             } else if selectedTool != nil {
                 backButton { selectedTool = nil }
@@ -29,6 +50,18 @@ struct StatusPanelView: View {
                 .lineLimit(1)
 
             Spacer()
+
+            Button(action: {
+                selectedTool = nil
+                selectedProject = nil
+                showingCaptureInbox.toggle()
+            }) {
+                Image(systemName: showingCaptureInbox ? "tray.full.fill" : "tray.full")
+                    .font(.system(size: 14))
+                    .foregroundColor(showingCaptureInbox ? .accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("捕获箱")
 
             statusIndicator(for: monitorEngine.globalStatus)
 
@@ -48,7 +81,9 @@ struct StatusPanelView: View {
 
     @ViewBuilder
     private var contentView: some View {
-        if let project = selectedProject {
+        if showingCaptureInbox {
+            captureInboxView
+        } else if let project = selectedProject {
             sessionListView(project: project)
         } else if let tool = selectedTool {
             projectListView(tool: tool)
@@ -58,12 +93,51 @@ struct StatusPanelView: View {
     }
 
     private var navigationTitle: String {
-        if let project = selectedProject {
+        if showingCaptureInbox {
+            return "捕获箱"
+        } else if let project = selectedProject {
             return project.projectName
         } else if let tool = selectedTool {
             return tool.toolType.displayName
         }
         return Self.dailyTitle
+    }
+
+    // MARK: - Capture Inbox
+
+    private var captureInboxView: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                Picker("", selection: $captureFilter) {
+                    ForEach(CaptureFilter.allCases) { filter in
+                        Text(filter.displayName).tag(filter)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if filteredCaptureItems.isEmpty {
+                    emptyStateView(message: "暂无记录")
+                } else {
+                    ForEach(filteredCaptureItems) { item in
+                        CaptureRowView(item: item) {
+                            captureStore.toggleCompleted(item)
+                        }
+                    }
+                }
+            }
+            .padding(12)
+        }
+    }
+
+    private var filteredCaptureItems: [CaptureItem] {
+        switch captureFilter {
+        case .all:
+            return captureStore.recentItems
+        case .todo:
+            return captureStore.recentItems.filter { $0.kind == .todo }
+        case .idea:
+            return captureStore.recentItems.filter { $0.kind == .idea }
+        }
     }
 
     /// 每日一句: 按日期轮换, 当天内固定
@@ -402,6 +476,69 @@ struct SessionRowView: View {
     }
 }
 
+struct CaptureRowView: View {
+    let item: CaptureItem
+    let onToggleComplete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            if item.kind == .todo {
+                Button(action: onToggleComplete) {
+                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 15))
+                        .foregroundColor(item.isCompleted ? .green : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(item.isCompleted ? "标记为未完成" : "标记为完成")
+                .padding(.top, 1)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(item.kind.displayName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(kindColor)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(kindColor.opacity(0.12))
+                        .cornerRadius(4)
+
+                    Text(item.createdAt.timeAgoDisplay)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+
+                    if let reminderAt = item.reminderAt, item.kind == .todo {
+                        Text("提醒 \(reminderAt.shortReminderDisplay)")
+                            .font(.system(size: 11))
+                            .foregroundColor(item.isCompleted ? .secondary : .orange)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+                }
+
+                Text(item.text)
+                    .font(.system(size: 13))
+                    .foregroundColor(item.isCompleted ? .secondary : .primary)
+                    .strikethrough(item.isCompleted)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .cornerRadius(8)
+    }
+
+    private var kindColor: Color {
+        switch item.kind {
+        case .todo: return .orange
+        case .idea: return .blue
+        }
+    }
+}
+
 // MARK: - Extensions
 
 extension AgentStatus {
@@ -429,5 +566,15 @@ extension Date {
         if seconds < 3600 { return "\(seconds / 60)分钟前" }
         if seconds < 86400 { return "\(seconds / 3600)小时前" }
         return "\(seconds / 86400)天前"
+    }
+
+    var shortReminderDisplay: String {
+        let formatter = DateFormatter()
+        if Calendar.current.isDateInToday(self) {
+            formatter.dateFormat = "HH:mm"
+        } else {
+            formatter.dateFormat = "M/d HH:mm"
+        }
+        return formatter.string(from: self)
     }
 }

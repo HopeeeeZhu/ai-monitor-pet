@@ -1,5 +1,6 @@
 import Cocoa
 import SwiftUI
+import UserNotifications
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitorEngine: MonitorEngine!
@@ -11,16 +12,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var usageMonitor: UsageMonitor!
     private var petWindow: PetWindow!
     private var notificationManager: NotificationManager!
+    private var captureStore: CaptureStore!
+    private var voiceCaptureController: VoiceCaptureController!
+    private var captureNotificationDelegate: CaptureNotificationDelegate!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("=== AIMonitorPet Starting ===")
 
         // 初始化监控引擎
         monitorEngine = MonitorEngine.shared
+        captureStore = CaptureStore()
+        voiceCaptureController = VoiceCaptureController(store: captureStore)
+        captureNotificationDelegate = CaptureNotificationDelegate()
+        UNUserNotificationCenter.current().delegate = captureNotificationDelegate
 
         // 初始化宠物窗口
-        petWindow = PetWindow(monitorEngine: monitorEngine)
+        petWindow = PetWindow(
+            monitorEngine: monitorEngine,
+            voiceCaptureController: voiceCaptureController,
+            captureStore: captureStore
+        )
         petWindow.show()
+        voiceCaptureController.startHotKey()
 
         // 初始化通知系统
         notificationManager = NotificationManager(monitorEngine: monitorEngine, petWindow: petWindow)
@@ -56,6 +69,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         signalFileAdapter.stop()
         processMonitor.stop()
         usageMonitor.stop()
+        voiceCaptureController.stopHotKey()
     }
 }
 
