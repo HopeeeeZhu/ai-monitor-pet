@@ -53,7 +53,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         aoneCopilotAdapter.start()
         // ProcessMonitor 作为兜底，检测进程退出
         processMonitor.start()
-        // UsageMonitor 读取 Claude/Codex 订阅额度(面板顶部展示)
+        // UsageMonitor 读取 Codex 订阅额度(面板顶部展示)
         usageMonitor = UsageMonitor(monitorEngine: monitorEngine)
         usageMonitor.start()
 

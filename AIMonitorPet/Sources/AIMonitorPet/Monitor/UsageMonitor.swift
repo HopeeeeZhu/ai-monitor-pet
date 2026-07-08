@@ -16,16 +16,12 @@ struct ToolUsage {
     var note: String?
 }
 
-/// 读取 Claude / Codex 的订阅额度用量
+/// 读取 Codex 的订阅额度用量
 /// - Codex: 解析 ~/.codex/sessions 最新 rollout jsonl 里的 rate_limits(纯本地)
-/// - Claude: 钥匙串取 Claude Code OAuth token, 调 /api/oauth/usage(同 /usage 命令的数据源)
 class UsageMonitor {
     private let monitorEngine: MonitorEngine
     private var codexTimer: Timer?
-    private var claudeTimer: Timer?
     private let codexInterval: TimeInterval = 60
-    /// OAuth usage 接口社区实测 180s 轮询安全, 更频繁会 429
-    private let claudeInterval: TimeInterval = 180
     private let tailByteLimit = 256 * 1024
 
     init(monitorEngine: MonitorEngine) {
@@ -33,26 +29,19 @@ class UsageMonitor {
     }
 
     func start() {
-        print("[UsageMonitor] Starting usage polling (codex \(Int(codexInterval))s / claude \(Int(claudeInterval))s)")
+        print("[UsageMonitor] Starting usage polling (codex \(Int(codexInterval))s)")
         codexTimer = Timer.scheduledTimer(withTimeInterval: codexInterval, repeats: true) { [weak self] _ in
             self?.pollCodexAsync()
         }
-        claudeTimer = Timer.scheduledTimer(withTimeInterval: claudeInterval, repeats: true) { [weak self] _ in
-            self?.pollClaude()
-        }
         pollCodexAsync()
-        pollClaude()
     }
 
     func stop() {
         codexTimer?.invalidate()
-        claudeTimer?.invalidate()
         codexTimer = nil
-        claudeTimer = nil
     }
 
     private func publish(_ usage: ToolUsage, for tool: ToolType) {
-        if tool == .claudeDesktop { claudePublishedOnce = true }
         Task { @MainActor in
             self.monitorEngine.updateUsage(tool: tool, usage: usage)
         }

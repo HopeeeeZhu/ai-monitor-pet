@@ -1,7 +1,7 @@
+import AppKit
 import SwiftUI
 
 enum CaptureFilter: String, CaseIterable, Identifiable {
-    case all
     case todo
     case idea
 
@@ -9,7 +9,6 @@ enum CaptureFilter: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .all: return "全部"
         case .todo: return "待办"
         case .idea: return "想法"
         }
@@ -24,7 +23,7 @@ struct StatusPanelView: View {
     @State private var selectedTool: ToolState?
     @State private var selectedProject: ProjectState?
     @State private var showingCaptureInbox = false
-    @State private var captureFilter: CaptureFilter = .all
+    @State private var captureFilter: CaptureFilter = .idea
 
     var body: some View {
         VStack(spacing: 0) {
@@ -143,8 +142,6 @@ struct StatusPanelView: View {
 
     private var filteredCaptureItems: [CaptureItem] {
         switch captureFilter {
-        case .all:
-            return captureStore.recentItems
         case .todo:
             return captureStore.recentItems.filter { $0.kind == .todo }
         case .idea:
@@ -181,10 +178,11 @@ struct StatusPanelView: View {
         ScrollView {
             LazyVStack(spacing: 8) {
                 usageSection
-                if monitorEngine.tools.isEmpty {
+                codexRunningSection
+                if visibleTools.isEmpty && !hasCodexRunningDetails {
                     emptyStateView(message: "暂无 AI 工具在线")
                 } else {
-                    ForEach(monitorEngine.tools) { tool in
+                    ForEach(visibleTools) { tool in
                         ToolRowView(tool: tool)
                             .onTapGesture { selectedTool = tool }
                     }
@@ -194,11 +192,19 @@ struct StatusPanelView: View {
         }
     }
 
+    private var visibleTools: [ToolState] {
+        monitorEngine.tools.filter { $0.toolType != .codexDesktop }
+    }
+
+    private var hasCodexRunningDetails: Bool {
+        !(monitorEngine.desktopRunningDetails[.codexDesktop] ?? []).isEmpty
+    }
+
     // MARK: - 额度区块 (Layer 1 顶部)
 
     @ViewBuilder
     private var usageSection: some View {
-        let order: [ToolType] = [.claudeDesktop, .codexDesktop]
+        let order: [ToolType] = [.codexDesktop]
         if order.contains(where: { monitorEngine.usage[$0] != nil }) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("额度")
@@ -208,6 +214,24 @@ struct StatusPanelView: View {
                     if let usage = monitorEngine.usage[tool] {
                         UsageRowView(toolName: tool.displayName, usage: usage)
                     }
+                }
+            }
+            .padding(.bottom, 4)
+        }
+    }
+
+    // MARK: - Codex 运行中项目 (Layer 1 顶部)
+
+    @ViewBuilder
+    private var codexRunningSection: some View {
+        let details = monitorEngine.desktopRunningDetails[.codexDesktop] ?? []
+        if !details.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Codex 运行中")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
+                ForEach(Array(details.enumerated()), id: \.offset) { _, detail in
+                    CodexRunningRowView(detail: detail)
                 }
             }
             .padding(.bottom, 4)
@@ -371,6 +395,58 @@ struct UsageRowView: View {
     }()
 }
 
+struct CodexRunningRowView: View {
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(Color.green)
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(projectName)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                if let taskName {
+                    Text(taskName)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            Text("运行中")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.green)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.green.opacity(0.12))
+                .cornerRadius(4)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .cornerRadius(8)
+        .help(detail)
+    }
+
+    private var projectName: String {
+        splitDetail.first ?? detail
+    }
+
+    private var taskName: String? {
+        guard splitDetail.count > 1 else { return nil }
+        return splitDetail.dropFirst().joined(separator: " · ")
+    }
+
+    private var splitDetail: [String] {
+        detail.components(separatedBy: " · ").filter { !$0.isEmpty }
+    }
+}
+
 struct ToolRowView: View {
     let tool: ToolState
 
@@ -491,6 +567,7 @@ struct SessionRowView: View {
 struct CaptureRowView: View {
     let item: CaptureItem
     let onToggleComplete: () -> Void
+    @State private var copied = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -536,6 +613,26 @@ struct CaptureRowView: View {
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            VStack(spacing: 7) {
+                Button(action: copyText) {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(copied ? .green : .secondary)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("复制内容")
+
+                Button(action: { CodexTaskLauncher.launch(item: item) }) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.accentColor)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("发送到 Codex")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -547,6 +644,16 @@ struct CaptureRowView: View {
         switch item.kind {
         case .todo: return .orange
         case .idea: return .blue
+        }
+    }
+
+    private func copyText() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.text, forType: .string)
+        copied = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            copied = false
         }
     }
 }

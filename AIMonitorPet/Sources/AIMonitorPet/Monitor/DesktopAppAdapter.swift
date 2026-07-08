@@ -357,7 +357,7 @@ class DesktopAppAdapter {
 
     // MARK: - 在跑会话详情 ("项目 · 任务"，供宠物头顶标签展示)
 
-    private let maxDetailCount = 4
+    private let maxDetailCount = 8
     private let claudeDetailLookbackSeconds: TimeInterval = 15 * 60
 
     private func runningDetails(for config: DesktopAppConfig) -> [String] {
