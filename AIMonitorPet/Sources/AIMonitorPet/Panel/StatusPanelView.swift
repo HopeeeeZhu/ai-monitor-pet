@@ -19,6 +19,7 @@ enum CaptureFilter: String, CaseIterable, Identifiable {
 struct StatusPanelView: View {
     @ObservedObject var monitorEngine: MonitorEngine
     @ObservedObject var captureStore: CaptureStore
+    var onManualCapture: (() -> Void)?
     var onClose: (() -> Void)?
     @State private var selectedTool: ToolState?
     @State private var selectedProject: ProjectState?
@@ -108,12 +109,23 @@ struct StatusPanelView: View {
     private var captureInboxView: some View {
         ScrollView {
             LazyVStack(spacing: 8) {
-                Picker("", selection: $captureFilter) {
-                    ForEach(CaptureFilter.allCases) { filter in
-                        Text(filter.displayName).tag(filter)
+                HStack(spacing: 8) {
+                    Picker("", selection: $captureFilter) {
+                        ForEach(CaptureFilter.allCases) { filter in
+                            Text(filter.displayName).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if let onManualCapture {
+                        Button(action: onManualCapture) {
+                            Image(systemName: "square.and.pencil")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .help("手动记录待办")
                     }
                 }
-                .pickerStyle(.segmented)
 
                 if filteredCaptureItems.isEmpty {
                     emptyStateView(message: "暂无记录")

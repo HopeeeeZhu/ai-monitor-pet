@@ -41,7 +41,7 @@ final class VoiceCaptureController {
     func toggleCapture() {
         switch service.phase {
         case .recording:
-            stopRecording()
+            stopRecording(saveImmediately: true)
         case .requestingPermission:
             cancel()
         case .reviewing:
@@ -56,9 +56,23 @@ final class VoiceCaptureController {
         service.start()
     }
 
-    func stopRecording() {
+    func startManualEntry() {
+        showHUD()
+        service.startManualEntry()
+        positionHUD()
+    }
+
+    func stopRecording(saveImmediately: Bool = false) {
         service.stop()
         positionHUD()
+        guard saveImmediately else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            let text = service.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+            save(kind: .todo, text: text, reminderAt: nil)
+        }
     }
 
     func save(kind: CaptureKind, text: String, reminderAt: Date?) {

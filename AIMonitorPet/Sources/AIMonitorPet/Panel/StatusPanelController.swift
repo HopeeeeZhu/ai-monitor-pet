@@ -6,14 +6,16 @@ class StatusPanelController {
     private var panelWindow: NSPanel?
     private let monitorEngine: MonitorEngine
     private let captureStore: CaptureStore
+    private let voiceCaptureController: VoiceCaptureController
     private var isVisible = false
     /// 点击面板外部自动关闭用的事件监听
     private var clickMonitors: [Any] = []
     private weak var petWindowRef: NSWindow?
 
-    init(monitorEngine: MonitorEngine, captureStore: CaptureStore) {
+    init(monitorEngine: MonitorEngine, captureStore: CaptureStore, voiceCaptureController: VoiceCaptureController) {
         self.monitorEngine = monitorEngine
         self.captureStore = captureStore
+        self.voiceCaptureController = voiceCaptureController
     }
 
     func toggle(relativeTo petWindow: NSWindow) {
@@ -122,9 +124,19 @@ class StatusPanelController {
     }
 
     private func createPanel() {
-        let contentView = StatusPanelView(monitorEngine: monitorEngine, captureStore: captureStore, onClose: { [weak self] in
-            self?.hide()
-        })
+        let contentView = StatusPanelView(
+            monitorEngine: monitorEngine,
+            captureStore: captureStore,
+            onManualCapture: { [weak self] in
+                Task { @MainActor in
+                    self?.hide()
+                    self?.voiceCaptureController.startManualEntry()
+                }
+            },
+            onClose: { [weak self] in
+                self?.hide()
+            }
+        )
         let hostingView = NSHostingView(rootView: contentView)
 
         let panel = NSPanel(

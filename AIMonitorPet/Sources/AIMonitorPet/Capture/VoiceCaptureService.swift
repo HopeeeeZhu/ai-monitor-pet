@@ -45,6 +45,13 @@ final class VoiceCaptureService: ObservableObject {
         }
     }
 
+    func startManualEntry() {
+        stopAudio()
+        transcript = ""
+        elapsedSeconds = 0
+        phase = .reviewing
+    }
+
     func stop() {
         guard phase == .recording else { return }
         audioEngine.stop()

@@ -60,7 +60,11 @@ class PetWindow: NSPanel {
         setupImageView()
         bindToMonitorEngine()
         positionAtBottomRight()
-        statusPanelController = StatusPanelController(monitorEngine: monitorEngine, captureStore: captureStore)
+        statusPanelController = StatusPanelController(
+            monitorEngine: monitorEngine,
+            captureStore: captureStore,
+            voiceCaptureController: voiceCaptureController
+        )
         setAnimation(.sleeping, force: true)
     }
 
@@ -397,6 +401,10 @@ class PetWindow: NSPanel {
         voiceItem.target = self
         menu.addItem(voiceItem)
 
+        let manualItem = NSMenuItem(title: "手动记录待办", action: #selector(startManualCapture), keyEquivalent: "")
+        manualItem.target = self
+        menu.addItem(manualItem)
+
         menu.addItem(.separator())
 
         let sizeMenu = NSMenu()
@@ -429,6 +437,10 @@ class PetWindow: NSPanel {
 
     @objc private func startVoiceCapture() {
         voiceCaptureController.startRecording()
+    }
+
+    @objc private func startManualCapture() {
+        voiceCaptureController.startManualEntry()
     }
 
     @objc private func quitApp() {

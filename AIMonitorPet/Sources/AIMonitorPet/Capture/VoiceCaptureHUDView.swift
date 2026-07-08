@@ -28,10 +28,10 @@ struct VoiceCaptureHUDView: View {
                     statusLine(text: "正在听 \(formatElapsed(service.elapsedSeconds))", color: .red, showPulse: true)
                     Spacer()
                     Button(action: onStop) {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 11, weight: .bold))
+                        Label("停止", systemImage: "stop.fill")
+                            .font(.system(size: 12, weight: .semibold))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderedProminent)
                     .help("停止录音")
                 }
                 Text(service.transcript.isEmpty ? "把想法说出来..." : service.transcript)
@@ -39,6 +39,10 @@ struct VoiceCaptureHUDView: View {
                     .foregroundColor(service.transcript.isEmpty ? .secondary : .primary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                Text("再按 Control + Option + V 也可以停止")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
 
             case .reviewing:
                 Picker("", selection: $selectedKind) {
